@@ -1,0 +1,19 @@
+{
+  "machine_type": "CNC",
+  "feed_rate_cut": 380.0,
+  "feed_rate_plunge": 100.0,
+  "safe_height": 4.0,
+  "step_down": 0.800000011920929,
+  "tool_diameter": 1.399999976158142,
+  "spindle_speed": 8000,
+  "laser_power": 80.0,
+  "laser_speed": 1000.0,
+  "depth_extra": 0.0,
+  "retract_between_passes": false,
+  "tab_enabled": true,
+  "tab_height": 0.800000011920929,
+  "tab_width": 1.600000023841858,
+  "tab_count": 4,
+  "pack_area_width": 60.0,
+  "pack_area_height": 60.0
+}
