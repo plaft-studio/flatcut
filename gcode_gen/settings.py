@@ -28,7 +28,7 @@ def update_machine_type(self, context):
     """Update related properties when machine type changes"""
     if self.machine_type == 'LASER':
         # Laser defaults
-        self.tool_diameter = 0.5  # 0.5mm kerf width (minimum allowed)
+        self.tool_diameter = 0.2  # 0.2mm kerf width (typical for diode/CO2)
         self.feed_rate_cut = 1000.0  # Laser cutting speed (mm/min)
         self.spindle_speed = 200  # Laser power (0-255 range, or percentage)
     else:  # CNC
@@ -108,7 +108,7 @@ class GcodeProperties(bpy.types.PropertyGroup):
         default=1.4,
         min=0.01,
         max=50.0,
-        soft_min=1.0,
+        soft_min=0.05,  # Laser kerf widths are typically 0.1-0.3mm
         soft_max=6.0,
         subtype='DISTANCE'
     )
