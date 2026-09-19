@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "flatcut"
-version = "1.1.0"
+version = "1.1.1"
 name = "Flatcut"
 tagline = "Export wood parts to G-code/SVG for laser and CNC 2D cutting"
 maintainer = "Itamoto Shintaro (GitHub: @itashin0501)"
