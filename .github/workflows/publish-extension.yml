@@ -1,0 +1,116 @@
+# Builds the extension package and publishes it to extensions.blender.org.
+#
+# extensions.blender.org does not track this repository: a version only goes
+# live once its .zip is uploaded. Publishing a GitHub Release does that here.
+#
+# Setup: store an upload token from
+# https://extensions.blender.org/settings/tokens/ as the repository secret
+# BLENDER_EXTENSIONS_TOKEN.
+
+name: Publish extension
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Upload to extensions.blender.org (off = build and validate only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  BLENDER_VERSION: "5.1.2"
+  EXTENSION_ID: flatcut
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Blender
+        id: cache-blender
+        uses: actions/cache@v4
+        with:
+          path: ~/blender
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64
+
+      - name: Download Blender
+        if: steps.cache-blender.outputs.cache-hit != 'true'
+        run: |
+          series="${BLENDER_VERSION%.*}"
+          url="https://download.blender.org/release/Blender${series}/blender-${BLENDER_VERSION}-linux-x64.tar.xz"
+          echo "Downloading $url"
+          mkdir -p ~/blender
+          curl -fsSL "$url" | tar -xJ -C ~/blender --strip-components=1
+
+      - name: Check the manifest version against the tag
+        if: github.event_name == 'release'
+        run: |
+          manifest_version=$(grep -m1 '^version = ' blender_manifest.toml | cut -d'"' -f2)
+          tag_version="${GITHUB_REF_NAME#v}"
+          echo "manifest: $manifest_version | tag: $tag_version"
+          if [ "$manifest_version" != "$tag_version" ]; then
+            echo "::error::blender_manifest.toml is at $manifest_version but the tag is $tag_version. Bump the manifest and re-tag."
+            exit 1
+          fi
+
+      - name: Validate
+        run: ~/blender/blender --command extension validate .
+
+      - name: Build
+        id: build
+        run: |
+          mkdir -p dist
+          ~/blender/blender --command extension build --source-dir . --output-dir dist
+          package=$(ls dist/*.zip | head -1)
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          echo "Built $package"
+          unzip -l "$package"
+
+      - name: Upload the package as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.EXTENSION_ID }}-package
+          path: ${{ steps.build.outputs.package }}
+
+      - name: Attach the package to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" "${{ steps.build.outputs.package }}" --clobber
+
+      - name: Publish to extensions.blender.org
+        if: github.event_name == 'release' || inputs.publish
+        env:
+          TOKEN: ${{ secrets.BLENDER_EXTENSIONS_TOKEN }}
+          PACKAGE: ${{ steps.build.outputs.package }}
+          RELEASE_NOTES: ${{ github.event.release.body }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Secret BLENDER_EXTENSIONS_TOKEN is not set. Create a token at https://extensions.blender.org/settings/tokens/"
+            exit 1
+          fi
+
+          notes="${RELEASE_NOTES:-Manual upload from ${GITHUB_SHA::7}.}"
+
+          status=$(curl -sS -X POST \
+            "https://extensions.blender.org/api/v1/extensions/${EXTENSION_ID}/versions/upload/" \
+            -H "Authorization: bearer $TOKEN" \
+            -F "version_file=@${PACKAGE}" \
+            -F "release_notes=${notes}" \
+            -o response.json -w '%{http_code}')
+
+          echo "HTTP $status"
+          cat response.json
+          echo
+
+          case "$status" in
+            2*) echo "Uploaded. New versions may sit in the moderation queue before going live." ;;
+            *)  echo "::error::Upload failed with HTTP $status"; exit 1 ;;
+          esac
