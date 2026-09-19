@@ -5,7 +5,7 @@
 #
 # Setup: store an upload token from
 # https://extensions.blender.org/settings/tokens/ as the repository secret
-# BLENDER_EXTENSIONS_TOKEN.
+# BLENDER_EXTENSIONS_TOKEN (Settings > Secrets and variables > Actions).
 
 name: Publish extension
 
@@ -18,6 +18,10 @@ on:
         description: "Upload to extensions.blender.org (off = build and validate only)"
         type: boolean
         default: false
+      release_tag:
+        description: "Existing release tag to build and take the release notes from (e.g. v1.1.1). Leave empty to use the default branch."
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -25,6 +29,8 @@ permissions:
 env:
   BLENDER_VERSION: "5.1.2"
   EXTENSION_ID: flatcut
+  # The release this run belongs to, for a release event or a dispatched retry
+  TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
 
 jobs:
   publish:
@@ -32,6 +38,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Cache Blender
         id: cache-blender
@@ -50,10 +58,10 @@ jobs:
           curl -fsSL "$url" | tar -xJ -C ~/blender --strip-components=1
 
       - name: Check the manifest version against the tag
-        if: github.event_name == 'release'
+        if: env.TAG != ''
         run: |
           manifest_version=$(grep -m1 '^version = ' blender_manifest.toml | cut -d'"' -f2)
-          tag_version="${GITHUB_REF_NAME#v}"
+          tag_version="${TAG#v}"
           echo "manifest: $manifest_version | tag: $tag_version"
           if [ "$manifest_version" != "$tag_version" ]; then
             echo "::error::blender_manifest.toml is at $manifest_version but the tag is $tag_version. Bump the manifest and re-tag."
@@ -80,24 +88,34 @@ jobs:
           path: ${{ steps.build.outputs.package }}
 
       - name: Attach the package to the release
-        if: github.event_name == 'release'
+        if: env.TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" "${{ steps.build.outputs.package }}" --clobber
+        run: gh release upload "$TAG" "${{ steps.build.outputs.package }}" --clobber
 
       - name: Publish to extensions.blender.org
         if: github.event_name == 'release' || inputs.publish
         env:
           TOKEN: ${{ secrets.BLENDER_EXTENSIONS_TOKEN }}
           PACKAGE: ${{ steps.build.outputs.package }}
-          RELEASE_NOTES: ${{ github.event.release.body }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -z "$TOKEN" ]; then
-            echo "::error::Secret BLENDER_EXTENSIONS_TOKEN is not set. Create a token at https://extensions.blender.org/settings/tokens/"
+            echo "::error::Secret BLENDER_EXTENSIONS_TOKEN is not set (Settings > Secrets and variables > Actions). Create a token at https://extensions.blender.org/settings/tokens/"
             exit 1
           fi
 
-          notes="${RELEASE_NOTES:-Manual upload from ${GITHUB_SHA::7}.}"
+          # Take the notes from the release, so a dispatched retry of a failed
+          # upload reuses them instead of falling back to a bare commit line
+          if [ -n "$TAG" ]; then
+            RELEASE_NOTES=$(gh release view "$TAG" --json body --jq .body)
+            RELEASE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+            export RELEASE_NOTES RELEASE_URL
+          fi
+
+          # The platform caps release notes at 1024 characters
+          notes=$(python3 .github/scripts/release_notes.py)
+          echo "Release notes: ${#notes} characters"
 
           status=$(curl -sS -X POST \
             "https://extensions.blender.org/api/v1/extensions/${EXTENSION_ID}/versions/upload/" \
