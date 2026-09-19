@@ -93,6 +93,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" "${{ steps.build.outputs.package }}" --clobber
 
+      # A tag created before this workflow existed does not carry its scripts,
+      # so the trimming tool always comes from the default branch
+      - name: Check out the release tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: .tooling
+          sparse-checkout: .github/scripts
+
       - name: Publish to extensions.blender.org
         if: github.event_name == 'release' || inputs.publish
         env:
@@ -114,7 +123,7 @@ jobs:
           fi
 
           # The platform caps release notes at 1024 characters
-          notes=$(python3 .github/scripts/release_notes.py)
+          notes=$(python3 .tooling/.github/scripts/release_notes.py)
           echo "Release notes: ${#notes} characters"
 
           status=$(curl -sS -X POST \
