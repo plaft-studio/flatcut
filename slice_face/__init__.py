@@ -12,20 +12,23 @@ from .mesh_processing import (
     get_dimension_for_plane,
 )
 
-from .materials import (
-    get_or_create_slice_material,
-    apply_slice_face_material,
-    remove_slice_face_material,
-)
-
 from .face_selection import (
     save_slice_face_selection,
+    store_slice_face,
     get_slice_plane_from_object,
     clear_slice_face_data,
+    get_slice_face_indices,
+    remove_legacy_slice_material,
+)
+
+from .auto_detect import (
+    detect_slice_face_indices,
+    auto_detect_slice_face,
 )
 
 from .operators import (
     CAM_OT_SaveSliceFace,
+    CAM_OT_SelectSliceFace,
     CAM_OT_ClearSliceFace,
 )
 
@@ -35,12 +38,15 @@ __all__ = [
     'calculate_cutting_depth_from_slice_face',
     'position_for_slice_plane',
     'get_dimension_for_plane',
-    'get_or_create_slice_material',
-    'apply_slice_face_material',
-    'remove_slice_face_material',
     'save_slice_face_selection',
+    'store_slice_face',
     'get_slice_plane_from_object',
     'clear_slice_face_data',
+    'get_slice_face_indices',
+    'remove_legacy_slice_material',
+    'detect_slice_face_indices',
+    'auto_detect_slice_face',
     'CAM_OT_SaveSliceFace',
+    'CAM_OT_SelectSliceFace',
     'CAM_OT_ClearSliceFace',
 ]

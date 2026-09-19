@@ -11,18 +11,6 @@ copies slice_face/, gcode_gen/ and logger.py alongside this package.
 import bpy
 from bpy.props import PointerProperty
 
-# Hot reload support for development
-if "bpy" in locals():
-    import importlib
-    if "logger" in locals():
-        importlib.reload(logger)
-    if "slice_face" in locals():
-        importlib.reload(slice_face)
-    if "gcode_gen" in locals():
-        importlib.reload(gcode_gen)
-    if "ui_panel" in locals():
-        importlib.reload(ui_panel)
-
 # Import logger first
 from . import logger
 
@@ -34,6 +22,7 @@ from . import ui_panel
 # Import specific classes for registration
 from .slice_face import (
     CAM_OT_SaveSliceFace,
+    CAM_OT_SelectSliceFace,
     CAM_OT_ClearSliceFace,
 )
 
@@ -63,6 +52,7 @@ log = logger.get_logger()
 classes = (
     GcodeProperties,
     CAM_OT_SaveSliceFace,
+    CAM_OT_SelectSliceFace,
     CAM_OT_ClearSliceFace,
     CAM_OT_SavePreset,
     CAM_OT_LoadPreset,

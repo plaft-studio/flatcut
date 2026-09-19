@@ -4,7 +4,8 @@ A Blender extension that prepares wooden/plywood 3D models for 2D fabrication
 on laser cutters and CNC routers.
 
 - **Slice Face Setup** — define a cutting plane on any mesh object by
-  selecting its face(s) in Edit Mode
+  selecting its face(s) in Edit Mode, or let Flatten & Arrange auto-detect
+  the largest flat face of plate-like objects
 - **Guided export workflow** — flatten and arrange sliced parts into a
   preview scene, pack/nest them within a configurable work area, and preview
   toolpaths with depth-based color coding
@@ -29,7 +30,13 @@ Requires Blender 5.0+.
 1. Enable the extension; a "Flatcut" tab appears in the 3D Viewport sidebar
    (N-panel).
 2. Select a mesh, enter Edit Mode, select the face(s) that define the cutting
-   plane, and click **Save Slice Face**.
+   plane, and click **Save Slice Face**. This step is optional for plate-like
+   objects: **1. Flatten & Arrange** detects and saves the largest flat face
+   of any selected object that has no slice face yet (turn this off with
+   **Auto-Detect Slice Face** in Settings). The slice face is stored in the
+   object's custom properties and leaves the mesh untouched — click **Select
+   Slice Face** to enter Edit Mode with the saved faces selected and see
+   which ones are in use.
 3. Back in Object Mode, open **Settings** to configure machine type (CNC/
    Laser), feed rate, tool diameter, etc.
 4. Run the export workflow in order: **1. Flatten & Arrange** → **2. Pack
@@ -49,9 +56,11 @@ To develop with live reload in Blender, without zipping/installing:
 2. In Blender, add a **Local (Custom Directory)** Extensions repo pointing at
    the *parent* directory of the clone (e.g. `~/projects`) — Blender
    discovers `flatcut/` inside it as a package.
-3. Enable "Flatcut" from that repo. Edits to the source are picked up after
-   disabling/re-enabling the extension or restarting Blender (or wire up your
-   own file-watcher/hot-reload addon).
+3. Enable "Flatcut" from that repo.
+4. For live reload on save, install [`watch_reload.py`](watch_reload.py) as
+   its own separate add-on (Preferences > Add-ons > Install...) and enable
+   it — it watches Flatcut's files and auto-reloads on change, so edits show
+   up without disabling/re-enabling the extension or restarting Blender.
 
 To build a release zip:
 

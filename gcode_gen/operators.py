@@ -13,7 +13,12 @@ from mathutils import Vector
 from .settings import GcodeSettings
 from .generator import GcodeGenerator
 from .visualization import arrange_objects_for_export, create_toolpath_visualization
-from ..slice_face import extract_contour_from_slice_face, calculate_cutting_depth_from_slice_face
+from ..slice_face import (
+    extract_contour_from_slice_face,
+    calculate_cutting_depth_from_slice_face,
+    auto_detect_slice_face,
+    remove_legacy_slice_material,
+)
 from ..slice_face.mesh_processing import extract_contour_from_rotated_mesh
 
 # Import logger
@@ -192,6 +197,12 @@ class CAM_OT_Settings(bpy.types.Operator):
                 box.prop(gcode_props, "tab_height")
 
         layout.separator()
+        layout.label(text="Slice Face", icon='FACESEL')
+        box = layout.box()
+        box.prop(gcode_props, "auto_detect_slice_face")
+        box.label(text="Largest flat face of plate-like objects", icon='INFO')
+
+        layout.separator()
         layout.label(text="Packing", icon='STICKY_UVS_LOC')
         box = layout.box()
         box.prop(gcode_props, "pack_area_width")
@@ -213,6 +224,9 @@ class CAM_OT_PrepareGcodeExport(bpy.types.Operator):
         # Get selected mesh objects, or all mesh objects with slice face if none selected
         selected_objects = [obj for obj in context.selected_objects if obj.type == 'MESH']
 
+        # Auto-detection only ever touches objects the user picked explicitly
+        has_explicit_selection = bool(selected_objects)
+
         if not selected_objects:
             # No selection: use all mesh objects in scene that have slice face saved
             log.info("No objects selected. Searching for all mesh objects with slice face...")
@@ -221,7 +235,11 @@ class CAM_OT_PrepareGcodeExport(bpy.types.Operator):
             selected_objects = [obj for obj in all_mesh_objects if has_slice_face_data(obj)]
 
             if not selected_objects:
-                self.report({'ERROR'}, "No mesh objects with slice face found in scene")
+                self.report(
+                    {'ERROR'},
+                    "No mesh objects with slice face found in scene. "
+                    "Select objects to auto-detect their slice face."
+                )
                 log.error("No mesh objects with slice face data found")
                 return {'CANCELLED'}
 
@@ -248,8 +266,27 @@ class CAM_OT_PrepareGcodeExport(bpy.types.Operator):
         log.info("Phase 1: Creating and transforming objects...")
         created_objects = []  # List of (original_obj, mesh_copy, contours, depth) tuples
 
+        auto_detected_objects = []
+
         for obj in selected_objects:
             log.info(f"Processing object: {obj.name}")
+
+            # Older versions marked the slice face with a highlight material.
+            # Strip it here so it never travels into the preview scene, which
+            # copies material assignments from the source object.
+            remove_legacy_slice_material(obj)
+
+            # Objects without a saved slice face get one detected automatically,
+            # so nothing in the scene is modified behind the user's back.
+            auto_detect = (
+                gcode_props.auto_detect_slice_face
+                and has_explicit_selection
+                and "slice_face_indices" not in obj
+            )
+            if auto_detect:
+                log.info(f"No slice face saved for {obj.name}, attempting auto-detection...")
+                if auto_detect_slice_face(obj):
+                    auto_detected_objects.append(obj.name)
 
             # Extract contours directly from saved slice face
             contours = extract_contour_from_slice_face(obj)
@@ -328,7 +365,12 @@ class CAM_OT_PrepareGcodeExport(bpy.types.Operator):
                 break
 
         log.info(f"Step 1 complete: Created preview scene with {len(created_objects)} objects")
-        self.report({'INFO'}, f"Step 1 complete. {len(created_objects)} objects arranged. Use Step 2 to pack tighter.")
+
+        message = f"Step 1 complete. {len(created_objects)} objects arranged. Use Step 2 to pack tighter."
+        if auto_detected_objects:
+            log.info(f"Auto-detected slice face for: {', '.join(auto_detected_objects)}")
+            message += f" Slice face auto-detected for {len(auto_detected_objects)} object(s)."
+        self.report({'INFO'}, message)
         return {'FINISHED'}
 
 

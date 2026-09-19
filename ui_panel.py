@@ -57,6 +57,14 @@ class CAM_PT_FabricationPanel(bpy.types.Panel):
         row = subcol.row()
         row.enabled = can_save_slice_face
         row.operator("cam.save_slice_face", text="Save Slice Face", icon='FILE_TICK')
+
+        # Selecting the saved faces is how the user sees what is set, since
+        # the slice face leaves no mark on the mesh itself.
+        has_slice_face = obj is not None and obj.type == 'MESH' and "slice_face_indices" in obj
+        row = subcol.row()
+        row.enabled = has_slice_face
+        row.operator("cam.select_slice_face", text="Select Slice Face", icon='RESTRICT_SELECT_OFF')
+
         subcol.operator("cam.clear_slice_face", text="Clear Slice Face", icon='X')
 
         subcol.separator()

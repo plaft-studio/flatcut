@@ -6,13 +6,19 @@ through the UI.
 
 Operators:
     - CAM_OT_SaveSliceFace: Save selected faces as slice face
+    - CAM_OT_SelectSliceFace: Select the saved slice face in Edit Mode
     - CAM_OT_ClearSliceFace: Clear saved slice face data
 """
 
 import bpy
+import bmesh
 
 # Import face selection functions
-from .face_selection import save_slice_face_selection, clear_slice_face_data
+from .face_selection import (
+    save_slice_face_selection,
+    clear_slice_face_data,
+    get_slice_face_indices,
+)
 
 # Import logger
 try:
@@ -52,6 +58,58 @@ class CAM_OT_SaveSliceFace(bpy.types.Operator):
         else:
             self.report({'ERROR'}, "No faces selected or failed to save")
             return {'CANCELLED'}
+
+
+class CAM_OT_SelectSliceFace(bpy.types.Operator):
+    """Select the saved slice face in Edit Mode"""
+    bl_idname = "cam.select_slice_face"
+    bl_label = "Select Slice Face"
+    bl_description = "Enter Edit Mode and select the faces saved as the slice face"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        obj = context.active_object
+
+        if not obj or obj.type != 'MESH':
+            self.report({'WARNING'}, "No active mesh object")
+            return {'CANCELLED'}
+
+        face_indices = get_slice_face_indices(obj)
+
+        if not face_indices:
+            self.report({'WARNING'}, f"No slice face saved for {obj.name}")
+            return {'CANCELLED'}
+
+        # Face select mode makes the saved faces readable at a glance
+        context.tool_settings.mesh_select_mode = (False, False, True)
+
+        if obj.mode != 'EDIT':
+            bpy.ops.object.mode_set(mode='EDIT')
+
+        bm = bmesh.from_edit_mesh(obj.data)
+        bm.faces.ensure_lookup_table()
+
+        wanted = set(face_indices)
+        stale = len([i for i in wanted if i >= len(bm.faces)])
+
+        for face in bm.faces:
+            face.select = face.index in wanted
+
+        bm.select_flush_mode()
+        bmesh.update_edit_mesh(obj.data)
+
+        selected = len(wanted) - stale
+        if stale:
+            self.report(
+                {'WARNING'},
+                f"Selected {selected} face(s); {stale} saved face(s) no longer exist. "
+                "Re-save the slice face."
+            )
+            log.warning(f"{obj.name}: {stale} saved slice face indices are out of range")
+        else:
+            self.report({'INFO'}, f"Selected {selected} slice face(s) on {obj.name}")
+
+        return {'FINISHED'}
 
 
 class CAM_OT_ClearSliceFace(bpy.types.Operator):

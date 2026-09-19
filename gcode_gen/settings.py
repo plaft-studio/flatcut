@@ -106,8 +106,8 @@ class GcodeProperties(bpy.types.PropertyGroup):
         name="Tool Diameter",
         description="CNC: End mill diameter (mm) / Laser: Beam kerf width (mm)",
         default=1.4,
-        min=0.5,
-        max=30.0,
+        min=0.01,
+        max=50.0,
         soft_min=1.0,
         soft_max=6.0,
         subtype='DISTANCE'
@@ -231,6 +231,15 @@ class GcodeProperties(bpy.types.PropertyGroup):
             ('CENTER', "Center", "Center of work area as origin"),
         ],
         default='FRONT_LEFT',
+    )
+
+    auto_detect_slice_face: BoolProperty(
+        name="Auto-Detect Slice Face",
+        description=(
+            "When Flatten & Arrange runs on a selected object with no slice face saved, "
+            "detect the largest flat face automatically and save it"
+        ),
+        default=True
     )
 
     slice_plane: EnumProperty(
