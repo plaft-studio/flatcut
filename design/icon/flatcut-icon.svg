@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <rect width="256" height="256" rx="52" fill="#F2E3CC"/>
+  <!-- toolpath: a thick dashed stroke on the part outline, masked back to the
+       outside half, so it runs one tool radius clear of the part and rounds
+       off at the outside corners exactly as a real offset does -->
+  <path d="M72 53H184V91H109V111H165V147H109V203H72Z" fill="none" stroke="#E4571B" stroke-width="50" stroke-dasharray="30 16" stroke-linejoin="round"/>
+  <path d="M72 53H184V91H109V111H165V147H109V203H72Z" fill="none" stroke="#F2E3CC" stroke-width="28" stroke-linejoin="round"/>
+  <path d="M72 53H184V91H109V111H165V147H109V203H72Z" fill="#B9762E"/>
+</svg>

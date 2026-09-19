@@ -54,6 +54,11 @@ against the tag, builds the package, attaches it to the release and uploads
 it to the platform. It needs a repository secret `BLENDER_EXTENSIONS_TOKEN`,
 generated at https://extensions.blender.org/settings/tokens/.
 
+The listing icon is platform metadata rather than part of the package, so it
+is uploaded on the listing page and needs no new version. Its source is
+`design/icon/flatcut-icon.svg`; re-export with
+`inkscape design/icon/flatcut-icon.svg -o out.png -w 256 -h 256`.
+
 To release: bump `version` in `blender_manifest.toml`, then create a GitHub
 Release tagged `v<version>`. To build the package locally instead:
 
