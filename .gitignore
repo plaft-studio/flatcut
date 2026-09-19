@@ -10,3 +10,7 @@ Thumbs.db
 # Build output
 dist/
 *.zip
+
+# A global ignore rule on some machines swallows this package; the bundled
+# presets module must ship with the extension
+!gcode_gen/presets/
