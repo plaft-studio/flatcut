@@ -18,3 +18,17 @@ license = [
 copyright = [
   "2026 Itamoto Shintaro",
 ]
+
+# The extension package ships only what Blender needs to run the add-on.
+# Listing this replaces Blender's defaults, so those are repeated here.
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "/.git/",
+  "/*.zip",
+  "/.github/",
+  "/.gitignore",
+  ".DS_Store",
+  "/dist/",
+  "/watch_reload.py",
+]

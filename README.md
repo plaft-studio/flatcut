@@ -45,6 +45,23 @@ Requires Blender 5.0+.
 5. **Cancel and Return** discards the preview scene and returns you to the
    original scene.
 
+## Releasing
+
+extensions.blender.org does not track this repository — a version goes live
+only when its `.zip` is uploaded there. Publishing a GitHub Release runs
+`.github/workflows/publish-extension.yml`, which validates the manifest
+against the tag, builds the package, attaches it to the release and uploads
+it to the platform. It needs a repository secret `BLENDER_EXTENSIONS_TOKEN`,
+generated at https://extensions.blender.org/settings/tokens/.
+
+To release: bump `version` in `blender_manifest.toml`, then create a GitHub
+Release tagged `v<version>`. To build the package locally instead:
+
+```
+blender --command extension validate .
+blender --command extension build --source-dir . --output-dir dist
+```
+
 ## Development
 
 This repo's root *is* the installable extension package (it contains
