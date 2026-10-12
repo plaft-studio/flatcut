@@ -38,6 +38,14 @@ COPLANAR_TOLERANCE_RATIO = 1e-4
 # Areas within this ratio of the largest one count as a tie
 AREA_TIE_RATIO = 0.01
 
+# The face opposite the largest one counts as the plate's other side when it
+# has at least this fraction of the largest area (a pocket floor does not)
+MIN_OPPOSITE_SIDE_AREA_RATIO = 0.5
+
+# A side must face up by more than this (difference in normal Z) to be
+# preferred over the larger one; a plate standing on edge has no upper side
+UP_FACING_TOLERANCE = 0.01
+
 # Give up on meshes with no dominant plane (curved / organic geometry)
 MAX_CLUSTERS = 500
 
@@ -171,10 +179,25 @@ def detect_slice_face_indices(obj: bpy.types.Object) -> list:
         log.warning(f"No usable faces in {obj.name}")
         return []
 
-    # Largest surface wins; ties go to the cluster facing up (+Z)
+    # The largest surface gives the plane of the plate; ties go to the cluster facing up (+Z)
     largest_area = max(cluster["area"] for cluster in clusters)
     candidates = [c for c in clusters if c["area"] >= largest_area * (1.0 - AREA_TIE_RATIO)]
     best = max(candidates, key=lambda c: c["normal"].z)
+
+    # Which side of the plate ends up on top must not depend on area: grooves,
+    # pockets and chamfers shrink the face they are cut into, so the largest
+    # face is the untouched back. Of the plate's two sides, the one facing up
+    # in the scene is the front.
+    cos_tolerance = math.cos(NORMAL_ANGLE_TOLERANCE)
+    opposite_sides = [
+        c for c in clusters
+        if c["normal"].dot(best["normal"]) < -cos_tolerance
+        and c["area"] >= largest_area * MIN_OPPOSITE_SIDE_AREA_RATIO
+    ]
+    if opposite_sides:
+        opposite = max(opposite_sides, key=lambda c: c["area"])
+        if opposite["normal"].z > best["normal"].z + UP_FACING_TOLERANCE:
+            best = opposite
 
     # A slice face only makes sense when the object is plate-like: the
     # thickness perpendicular to the candidate must be small next to its width
