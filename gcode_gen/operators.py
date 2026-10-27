@@ -45,6 +45,41 @@ def get_source_gcode_properties(scene):
     return scene.gcode_properties
 
 
+def measure_grooved_board(mesh_obj):
+    """
+    Measure the V-grooves of a flattened board (slice face up).
+    Returns None for a board without grooves, or one that could not be measured.
+    """
+    from .grooves import detect_grooves
+    try:
+        board = detect_grooves(mesh_obj)
+    except Exception as e:
+        log.warning(f"Could not measure grooves of {mesh_obj.name}: {e}")
+        return None
+
+    for warning in board.warnings:
+        log.warning(f"  {mesh_obj.name}: {warning}")
+    return board if board.grooves else None
+
+
+def extract_board_contours(mesh_obj, board):
+    """
+    Outline and holes of a flattened board, given what measure_grooved_board found.
+
+    Grooves that open into the top face split it into strips, so its boundary
+    is no longer the outline; the section taken clear of the grooves is.
+    """
+    if board and board.front_grooves:
+        if not board.outline:
+            # The top face's boundary would run along every groove's mouth, and cutting
+            # it would saw the part apart at its folds: cut nothing rather than that
+            log.error(f"  Outline of {mesh_obj.name} could not be measured around its grooves; "
+                      "the part is skipped")
+            return []
+        return board.outline
+    return extract_contour_from_rotated_mesh(mesh_obj)
+
+
 class CAM_OT_SavePreset(bpy.types.Operator):
     """Save current settings as a named preset"""
     bl_idname = "cam.save_gcode_preset"
@@ -195,6 +230,17 @@ class CAM_OT_Settings(bpy.types.Operator):
                 box.prop(gcode_props, "tab_count")
                 box.prop(gcode_props, "tab_width")
                 box.prop(gcode_props, "tab_height")
+
+            layout.separator()
+            layout.label(text="V-Grooves", icon='MOD_BEVEL')
+            box = layout.box()
+            box.prop(gcode_props, "groove_enabled")
+            if gcode_props.groove_enabled:
+                box.prop(gcode_props, "vbit_angle_deg")
+                box.prop(gcode_props, "groove_min_wall_mm")
+                box.prop(gcode_props, "groove_stepover_mm")
+                box.prop(gcode_props, "groove_feed_rate_cut")
+                box.prop(gcode_props, "groove_feed_rate_plunge")
 
         layout.separator()
         layout.label(text="Slice Face", icon='FACESEL')
@@ -685,17 +731,28 @@ class CAM_OT_AddToolpathVisualization(bpy.types.Operator):
 
         log.info(f"Found {len(mesh_objects)} mesh objects to process")
 
+        groove_count = 0
+        back_groove_count = 0
+        uncut_groove_count = 0
+        wall_limited_count = 0
+        unmeasured_parts = []
+
         for mesh_obj in mesh_objects:
             log.info(f"Processing {mesh_obj.name}...")
             log.info(f"  Mesh has {len(mesh_obj.data.vertices)} vertices, {len(mesh_obj.data.edges)} edges")
 
+            # V-grooves are measured from the flattened mesh (slice face pointing +Z)
+            board = measure_grooved_board(mesh_obj) if gcode_props.groove_enabled else None
+
             # Extract contours by directly reading slice face edges from the rotated mesh
             # The mesh is already rotated with slice face pointing +Z
-            contours = extract_contour_from_rotated_mesh(mesh_obj)
-            log.info(f"  extract_contour_from_rotated_mesh returned: {len(contours) if contours else 0} contours")
+            contours = extract_board_contours(mesh_obj, board)
+            log.info(f"  extract_board_contours returned: {len(contours) if contours else 0} contours")
 
             if not contours:
                 log.warning(f"No contours found for {mesh_obj.name}, skipping")
+                if board and board.front_grooves:
+                    unmeasured_parts.append(mesh_obj.name.replace('_Original', ''))
                 continue
 
             log.info(f"  Extracted {len(contours)} contour(s)")
@@ -776,6 +833,62 @@ class CAM_OT_AddToolpathVisualization(bpy.types.Operator):
             # All toolpath meshes will be added to the dedicated Toolpaths collection
             log.info(f"  Using dedicated Toolpaths collection for {mesh_obj.name}")
 
+            # Grooves travel to Step 4 on the toolpath meshes, so the G-code is written
+            # from the same positions as the contours. Only the grooves that open into
+            # the top face can be reached by the bit.
+            base_name = mesh_obj.name.replace('_Original', '')
+            groove_data = None
+            if board and not is_laser:
+                front_grooves = board.front_grooves
+                back_groove_count += len(board.back_grooves)
+                if board.back_grooves:
+                    log.warning(f"  {len(board.back_grooves)} groove(s) of {mesh_obj.name} open into the "
+                                "bottom face and cannot be cut from above")
+                if front_grooves:
+                    import json
+                    groove_data = json.dumps({
+                        'thickness': board.thickness,
+                        'grooves': [[g.start[0], g.start[1], g.end[0], g.end[1], g.width, g.depth,
+                                     g.closed_start, g.closed_end, g.floor_width] for g in front_grooves],
+                    })
+                    groove_count += len(front_grooves)
+                    log.info(f"  {len(front_grooves)} V-groove(s) to cut")
+
+                    # Show every pass where the bit's tip will run, so the preview
+                    # is what gets cut
+                    groove_planner = GcodeGenerator(GcodeSettings(gcode_props))
+                    groove_verts = []
+                    for g in front_grooves:
+                        passes = groove_planner.plan_groove_passes(g, board.thickness)
+                        if not passes:
+                            uncut_groove_count += 1
+                            log.warning(f"  A groove of {mesh_obj.name} cannot be cut: board thickness "
+                                        f"{board.thickness:.3f}mm leaves nothing above the minimum "
+                                        f"remaining wall of {gcode_props.groove_min_wall_mm:.3f}mm")
+                        else:
+                            log.info(f"  Groove width {g.width:.3f}mm, depth {g.depth:.3f}mm: {len(passes)} "
+                                     f"pass(es), deepest {max(p[1] for p in passes):.3f}mm")
+                            if board.thickness - gcode_props.groove_min_wall_mm < g.depth - 0.01:
+                                wall_limited_count += 1
+                                log.warning(f"  Groove modelled {g.depth:.3f}mm deep in a {board.thickness:.3f}mm "
+                                            f"board is held to {board.thickness - gcode_props.groove_min_wall_mm:.3f}mm "
+                                            "by the minimum remaining wall")
+                        for _, pass_depth, start, end in passes:
+                            if start is None:
+                                continue
+                            groove_verts.append((start[0], start[1], obj_max_z - pass_depth))
+                            groove_verts.append((end[0], end[1], obj_max_z - pass_depth))
+                    groove_mesh = bpy.data.meshes.new(f"{base_name}_Grooves")
+                    groove_mesh.from_pydata(groove_verts, [(i, i + 1) for i in range(0, len(groove_verts), 2)], [])
+                    groove_mesh.update()
+                    groove_obj = bpy.data.objects.new(f"{base_name}_Grooves", groove_mesh)
+                    toolpaths_collection.objects.link(groove_obj)
+                    groove_obj.lock_location = (True, True, True)
+                    groove_obj.lock_rotation = (True, True, True)
+                    groove_obj.lock_scale = (True, True, True)
+                    groove_obj.display_type = 'WIRE'
+                    groove_obj.show_in_front = True
+
             # Create toolpath meshes (use validated num_passes and step_down from above)
             # num_passes was already calculated and validated above
 
@@ -829,8 +942,7 @@ class CAM_OT_AddToolpathVisualization(bpy.types.Operator):
                     log.warning(f"  Pass {pass_num+1}: No valid contours, skipping")
                     continue
 
-                # Create mesh name from the base name (remove '_Original' suffix)
-                base_name = mesh_obj.name.replace('_Original', '')
+                # Create mesh name from the base name ('_Original' suffix removed)
                 toolpath_mesh_name = f"{base_name}_Toolpath_P{pass_num+1}"
                 toolpath_mesh_data = bpy.data.meshes.new(toolpath_mesh_name)
 
@@ -841,6 +953,8 @@ class CAM_OT_AddToolpathVisualization(bpy.types.Operator):
                 # Create object
                 toolpath_obj = bpy.data.objects.new(toolpath_mesh_name, toolpath_mesh_data)
                 toolpaths_collection.objects.link(toolpath_obj)
+                if groove_data:
+                    toolpath_obj["flatcut_grooves"] = groove_data
 
                 # Position at world origin (vertices already in world space)
                 toolpath_obj.location = Vector((0, 0, 0))
@@ -872,7 +986,25 @@ class CAM_OT_AddToolpathVisualization(bpy.types.Operator):
 
             log.info(f"Added {num_passes} toolpath pass meshes for {mesh_obj.name}")
 
-        self.report({'INFO'}, f"Step 3 complete. Use 'Step 4' to generate G-code or 'Cancel' to return.")
+        message = "Step 3 complete."
+        if groove_count:
+            message += f" {groove_count} V-groove(s) will be cut."
+        message += " Use 'Step 4' to generate G-code or 'Cancel' to return."
+        if uncut_groove_count:
+            message += (f" {uncut_groove_count} groove(s) cannot be cut: the board is not thicker "
+                        "than the groove's minimum remaining wall.")
+        if back_groove_count:
+            message += f" {back_groove_count} groove(s) open into the bottom face and will not be cut."
+        if wall_limited_count:
+            message += (f" {wall_limited_count} groove(s) will be cut shallower than modelled, to keep "
+                        f"the minimum remaining wall of {gcode_props.groove_min_wall_mm:.2f}mm.")
+        if unmeasured_parts:
+            message += (f" Skipped {', '.join(unmeasured_parts)}: its outline could not be measured "
+                        "around its grooves (see the log).")
+        if uncut_groove_count or back_groove_count or wall_limited_count or unmeasured_parts:
+            self.report({'WARNING'}, message)
+        else:
+            self.report({'INFO'}, message)
         return {'FINISHED'}
 
 
@@ -1136,6 +1268,23 @@ class CAM_OT_DownloadGcode(bpy.types.Operator, ExportHelper):
 
             if not pass_data:
                 continue
+
+            # V-grooves first, while the part is still held by the sheet around it
+            groove_json = next((m["flatcut_grooves"] for m in passes.values() if "flatcut_grooves" in m), None)
+            if groove_json and not is_laser:
+                import json
+                from .grooves import Groove
+                groove_data = json.loads(groove_json)
+                shift_x = -plate_origin_x - origin_offset_x
+                shift_y = -origin_offset_y
+                grooves = [
+                    Groove((sx + shift_x, sy + shift_y), (ex + shift_x, ey + shift_y),
+                           width, groove_depth, True, bool(closed_start), bool(closed_end), floor_width)
+                    for sx, sy, ex, ey, width, groove_depth, closed_start, closed_end, floor_width
+                    in groove_data['grooves']
+                ]
+                lines.extend(generator.generate_groove_cut(grooves, groove_data['thickness']))
+                lines.append("")
 
             # Identify outer boundary and holes
             first_pass_contours = pass_data[pass_numbers[0]][2]
@@ -1496,7 +1645,8 @@ class CAM_OT_ExportSVG(bpy.types.Operator, ExportHelper):
         plate_indices_seen = set()
 
         for mesh_obj in mesh_objects:
-            contours = extract_contour_from_rotated_mesh(mesh_obj)
+            board = measure_grooved_board(mesh_obj) if gcode_props.groove_enabled else None
+            contours = extract_board_contours(mesh_obj, board)
             ordered = order_contours(contours)
             if not ordered:
                 log.warning(f"No contours for {mesh_obj.name}, skipping")

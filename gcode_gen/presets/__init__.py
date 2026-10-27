@@ -29,6 +29,12 @@ PRESET_PROPERTIES = [
     'tab_count',
     'pack_area_width',
     'pack_area_height',
+    'groove_enabled',
+    'vbit_angle_deg',
+    'groove_min_wall_mm',
+    'groove_stepover_mm',
+    'groove_feed_rate_cut',
+    'groove_feed_rate_plunge',
 ]
 
 

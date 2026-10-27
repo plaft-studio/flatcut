@@ -501,6 +501,129 @@ class GcodeGenerator:
 
         return lines
 
+    def plan_groove_passes(self, g, thickness: float):
+        """
+        The passes that cut one groove with the settings' V-bit, centered pass first.
+
+        The bit never cuts outside the groove as it is modelled: on every pass its tip
+        stays on or above the groove's wall and its cone inside the groove's mouth. A
+        groove no wider than the bit's own angle is one centered pass, as deep as its
+        mouth width allows (shallower than modelled). A wider groove is stepped: after
+        the centered pass at full depth, passes offset to either side follow the wall
+        up towards the mouth, each shallower than the last, so the groove keeps its V
+        shape as a staircase and the uncut remainder stays on the walls rather than a
+        flat floor being milled. The depth never goes past the groove's own measured
+        depth, nor leaves less than groove_min_wall_mm of material under it. An end
+        that stops inside the board is pulled in by the cone's radius at the surface,
+        so the bit does not bite into the board beyond it.
+
+        Args:
+            g: grooves.Groove
+            thickness: Material thickness (mm)
+
+        Returns:
+            List of (offset, depth, start, end): the sideways offset from the centre
+            line, the depth below the top face and the XY endpoints of the cut. start
+            and end are None for a pass too short to cut without overcutting its ends.
+        """
+        s = self.settings
+        tan_half = math.tan(math.radians(s.vbit_angle_deg) / 2)
+        max_depth = min(g.depth, thickness - s.groove_min_wall_mm)
+        length = g.length
+        # a pass shallower than this removes next to nothing
+        min_pass_depth = 0.05
+        if tan_half < 1e-9 or max_depth < min_pass_depth or length < 1e-6 or g.width < 1e-6:
+            return []
+
+        half_width = g.width / 2
+        half_floor = min(getattr(g, 'floor_width', 0.0), g.width) / 2
+
+        def tip_depth(offset):
+            """Deepest the tip may go at this offset from the centre line"""
+            reach = half_width - abs(offset)
+            # on the modelled wall, which runs from the mouth's edge down to the floor
+            if abs(offset) <= half_floor:
+                wall = g.depth
+            else:
+                wall = g.depth * reach / (half_width - half_floor)
+            # the cone must stay inside the mouth
+            return min(max_depth, wall, reach / tan_half)
+
+        cuts = [(0.0, tip_depth(0.0))]
+        step = max(s.groove_stepover_mm, 1e-3)
+        previous = cuts[0][1]
+        offset = step
+        while offset < half_width:
+            depth = tip_depth(offset)
+            if depth < min_pass_depth:
+                break
+            # a tip inside the cone of the pass before it cuts nothing new
+            if depth > previous - step / tan_half + 1e-6:
+                cuts.append((offset, depth))
+                cuts.append((-offset, depth))
+            previous = depth
+            offset += step
+
+        ux, uy = (g.end[0] - g.start[0]) / length, (g.end[1] - g.start[1]) / length
+        passes = []
+        for offset, depth in cuts:
+            # the cone's radius at the surface: how far the cut reaches past its endpoints
+            pull = depth * tan_half
+            t0 = pull if g.closed_start else 0.0
+            t1 = length - pull if g.closed_end else length
+            if t1 - t0 < 1e-3:
+                passes.append((offset, depth, None, None))
+                continue
+            nx, ny = -uy * offset, ux * offset
+            passes.append((offset, depth,
+                           (g.start[0] + ux * t0 + nx, g.start[1] + uy * t0 + ny),
+                           (g.start[0] + ux * t1 + nx, g.start[1] + uy * t1 + ny)))
+        return passes
+
+    def generate_groove_cut(self, grooves, thickness: float) -> List[str]:
+        """
+        V-groove each measured groove with the settings' V-bit, see plan_groove_passes.
+
+        Args:
+            grooves: grooves.Groove list, already in machine XY coordinates
+            thickness: Material thickness (mm)
+        """
+        lines = []
+        s = self.settings
+        lines.append(f"(V-grooves: {len(grooves)})")
+        if not grooves:
+            lines.append("(none)")
+            return lines
+
+        lines.append(f"(V-bit {s.vbit_angle_deg:.1f} deg, min remaining wall {s.groove_min_wall_mm:.3f}mm)")
+        lines.append("")
+
+        for i, g in enumerate(grooves):
+            lines.append(f"(Groove {i + 1}/{len(grooves)}, width {g.width:.3f}mm, "
+                         f"measured depth {g.depth:.3f}mm)")
+            passes = self.plan_groove_passes(g, thickness)
+            if not passes:
+                lines.append("(skipped: nothing to cut within the minimum remaining wall)")
+                lines.append("")
+                continue
+            if len(passes) == 1:
+                lines.append(f"(single centered pass, depth {passes[0][1]:.3f}mm)")
+            else:
+                lines.append(f"(wider than the bit: centered pass at depth {passes[0][1]:.3f}mm, then "
+                             f"{(len(passes) - 1) // 2} stepped pass(es) each side up the walls)")
+            for offset, depth, start, end in passes:
+                if start is None:
+                    lines.append(f"(skipped pass at offset {offset:.3f}mm: too short to cut "
+                                 "without overcutting its ends)")
+                    continue
+                lines.append(f"G0 Z{s.safe_height:.3f} (Retract to safe height)")
+                lines.append(f"G0 X{start[0]:.3f} Y{start[1]:.3f}")
+                lines.append(f"G1 Z{-depth:.3f} F{s.groove_feed_rate_plunge}")
+                lines.append(f"G1 X{end[0]:.3f} Y{end[1]:.3f} F{s.groove_feed_rate_cut}")
+                lines.append(f"G0 Z{s.safe_height:.3f}")
+            lines.append("")
+        return lines
+
 
 class LaserGcodeGenerator:
     """Generator for laser cutter G-code"""

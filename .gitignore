@@ -17,3 +17,6 @@ dist/
 # A global ignore rule on some machines swallows this package; the bundled
 # presets module must ship with the extension
 !gcode_gen/presets/
+
+# Personal presets
+gcode_gen/presets/woodPaper.json
