@@ -22,6 +22,11 @@ class GcodeSettings:
         self.tool_diameter = props.tool_diameter
         self.spindle_speed = props.spindle_speed
         self.start_position = props.start_position
+        self.vbit_angle_deg = props.vbit_angle_deg
+        self.groove_min_wall_mm = props.groove_min_wall_mm
+        self.groove_stepover_mm = props.groove_stepover_mm
+        self.groove_feed_rate_cut = props.groove_feed_rate_cut
+        self.groove_feed_rate_plunge = props.groove_feed_rate_plunge
 
 
 def update_machine_type(self, context):
@@ -188,6 +193,58 @@ class GcodeProperties(bpy.types.PropertyGroup):
         default=3,
         min=1,
         max=10
+    )
+
+    # V-groove settings (fold-line grooves measured from the part's geometry)
+    groove_enabled: BoolProperty(
+        name="Cut V-Grooves",
+        description="Detect the V-grooves modelled into the top face of each part and cut them "
+                    "before the outline. Turn off for parts whose tilted faces are not grooves",
+        default=True
+    )
+
+    vbit_angle_deg: FloatProperty(
+        name="V-bit Angle",
+        description="Included angle of the V-bit used for grooves (degrees)",
+        default=60.0,
+        min=10.0,
+        soft_max=120.0
+    )
+
+    groove_min_wall_mm: FloatProperty(
+        name="Groove Min. Remaining Wall",
+        description="Minimum material thickness to leave uncut below a groove, "
+                    "so the board is never cut all the way through (mm)",
+        default=0.5,
+        min=0.05,
+        soft_max=2.0,
+        subtype='DISTANCE'
+    )
+
+    groove_stepover_mm: FloatProperty(
+        name="Groove Stepover",
+        description="Sideways offset between passes when a groove is wider than the V-bit: "
+                    "each pass steps up the groove's wall, so smaller values give finer steps (mm)",
+        default=0.3,
+        min=0.05,
+        soft_max=2.0,
+        subtype='DISTANCE'
+    )
+
+    groove_feed_rate_cut: FloatProperty(
+        name="Feed Rate (Groove Cut)",
+        description="Cutting feed rate for grooves (mm/min)",
+        default=300.0,
+        min=10.0,
+        soft_max=3000.0
+    )
+
+    groove_feed_rate_plunge: FloatProperty(
+        name="Feed Rate (Groove Plunge)",
+        description="Plunge feed rate for grooves (mm/min)",
+        default=100.0,
+        min=10.0,
+        soft_max=1000.0
     )
 
     show_gcode_section: BoolProperty(
